@@ -48,7 +48,9 @@ export function stepCombat(c, dt, player, onPlayerHit) {
       onPlayerHit(TUNE.enemyDamage);
     }
     for (const b of c.bullets) {
-      if (b.life > 0 && dist2(b.x, b.y, e.x, e.y) < 26 * 26) {
+      // Only a living enemy can be hit: two bullets landing in the same
+      // step must not count one death twice.
+      if (b.life > 0 && e.health > 0 && dist2(b.x, b.y, e.x, e.y) < 26 * 26) {
         e.health -= TUNE.bulletDamage;
         b.life = 0;
         if (e.health <= 0) c.kills += 1;
