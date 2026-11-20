@@ -1,96 +1,110 @@
-// Screenshot staging: simulate real play forward, then paint one frame.
-// ?shot=start|drive|chase|mission (&seed=1) — each scene is a real game state.
-import { STEP } from './config.js';
-import { SCREEN_TITLE, SCREEN_PLAY } from './render.js';
-import { startMission } from './missions.js';
-import { spawnEnemies } from './combat.js';
-import { addHeat } from './police.js';
-import { enterCar } from './player.js';
+// Staged screenshot modes: deterministic scenes for ?shot=...&seed=...
+// start = title view, drive = behind the wheel downtown, chase = police pursuit,
+// mission = warehouse shootout in progress.
+import { SPOTS } from './missions.js';
 
-// Move the world forward: drive the car, or walk toward the mission marker.
-function simulate(state, seconds) {
-  const steps = Math.floor(seconds / STEP);
-  for (let i = 0; i < steps; i++) {
-    state.elapsed += STEP;
-    if (state.player.car) {
-      const car = state.player.car;
-      car.speed = Math.min(car.speed + 520 * STEP, 380);
-      car.x += Math.cos(car.angle) * car.speed * STEP;
-      car.y += Math.sin(car.angle) * car.speed * STEP;
-      if (car.x > 3300) car.angle = Math.PI;
-      state.player.x = car.x;
-      state.player.y = car.y;
-      state.player.speed = Math.abs(car.speed);
-    } else {
-      const t = state.missions.active ? state.missions.active.target : { x: 1800, y: 1300 };
-      const dx = t.x - state.player.x, dy = t.y - state.player.y;
-      const d = Math.hypot(dx, dy) || 1;
-      state.player.x += (dx / d) * 180 * STEP;
-      state.player.y += (dy / d) * 180 * STEP;
-      state.player.angle = Math.atan2(dy, dx);
-      state.player.speed = 180;
-    }
-    state.traffic.step(STEP);
-  }
+export function parseShotQuery(search) {
+  const params = new URLSearchParams(search);
+  const shot = params.get('shot');
+  const seed = Number(params.get('seed') || '1') || 1;
+  if (!shot) return null;
+  return { shot, seed };
 }
 
-export function stageShot(name, state, rng) {
-  state.player.x = 1500;
-  state.player.y = 1500;
-  state.player.onFoot = true;
-  state.player.car = null;
-  state.player.health = 100;
-  state.player.money = 1250;
-  startMission(state.missions, state.combat, rng, state.traffic);
-
-  if (name === 'start') {
-    simulate(state, 5);
-    return { screen: SCREEN_TITLE };
+export function applyShotMode(state, shotName, seed) {
+  const p = state.player;
+  const w = state.wanted;
+  const m = state.missions;
+  if (shotName === 'start') {
+    state.mode = 'title';
+    state.titleSelected = 0;
+    p.x = 1800;
+    p.y = 900;
+    return 'start';
   }
-  if (name === 'drive') {
-    const car = state.traffic.cars[0];
-    enterCar(state.player, car);
-    state.player.car.angle = 0;
-    state.player.car.x = 1200;
-    state.player.car.y = 600;
-    state.player.car.color = '#ff9f1c';
-    state.player.x = 1200;
-    state.player.y = 600;
-    simulate(state, 6);
-    return { screen: SCREEN_PLAY };
-  }
-  if (name === 'chase') {
-    const car = state.traffic.cars[1];
-    enterCar(state.player, car);
-    state.player.car.angle = 0.2;
-    state.player.car.x = 1800;
-    state.player.car.y = 900;
-    state.player.x = 1800;
-    state.player.y = 900;
-    addHeat(state.wanted, 80); // 3 stars
-    for (let i = 0; i < 6; i++) {
-      state.wanted.police.push({ x: 0, y: 0, angle: 0, speed: 360 });
-    }
-    simulate(state, 4);
-    // Pull the police close to the player so the chase reads in the shot.
-    state.wanted.police.forEach((pc, i) => {
-      pc.x = state.player.x - 130 - i * 50;
-      pc.y = state.player.y + (i - 2) * 70;
-      pc.speed = 360;
-      pc.angle = 0;
+  state.mode = 'play';
+  if (shotName === 'drive') {
+    // Player driving a taxi through Downtown Solmar with traffic around.
+    const taxi = state.parkedCars.find((c) => c.taxi) || state.parkedCars[0];
+    taxi.x = 1800;
+    taxi.y = 900;
+    taxi.angle = 0;
+    taxi.speed = 240;
+    p.inCar = taxi;
+    p.onFoot = false;
+    taxi.parked = false;
+    p.x = taxi.x;
+    p.y = taxi.y;
+    m.index = 0;
+    m.stage = 'carry';
+    m.active = true;
+    m.say('Fare picked up. Drive them to Solmar Pier.');
+    // Bring a few traffic cars into frame so the street feels alive.
+    const nearSpots = [
+      { x: 1800, y: 600, angle: Math.PI / 2 },
+      { x: 2100, y: 900, angle: Math.PI },
+      { x: 1800, y: 1200, angle: -Math.PI / 2 },
+      { x: 1500, y: 900, angle: 0 },
+      { x: 2100, y: 1200, angle: Math.PI / 2 },
+    ];
+    state.trafficCars.slice(0, 5).forEach((car, i) => {
+      car.x = nearSpots[i].x;
+      car.y = nearSpots[i].y;
+      car.angle = nearSpots[i].angle;
+      car.speed = 120;
     });
-    return { screen: SCREEN_PLAY };
+    return 'drive';
   }
-  // mission: on foot at the warehouse, rivals visible, objective marker up.
-  state.missions.index = 4;
-  state.missions.active = null;
-  startMission(state.missions, state.combat, rng, state.traffic);
-  state.player.x = 700;
-  state.player.y = 1350;
-  spawnEnemies(state.combat, 650, 1400, 4, rng);
-  state.combat.ammo = 48;
-  simulate(state, 2);
-  state.player.x = 700;
-  state.player.y = 1350;
-  return { screen: SCREEN_PLAY };
+  if (shotName === 'chase') {
+    // Player in a fast car at 3 stars with four police cars closing in.
+    const car = state.parkedCars[0];
+    car.x = 1800;
+    car.y = 1500;
+    car.angle = -Math.PI / 2;
+    car.speed = 300;
+    p.inCar = car;
+    p.onFoot = false;
+    car.parked = false;
+    p.x = car.x;
+    p.y = car.y;
+    w.setStars(3);
+    const rng = state.rng;
+    for (let i = 0; i < 4; i += 1) {
+      const ang = (i / 4) * Math.PI * 2 + 0.4;
+      w.police.push({
+        x: p.x + Math.cos(ang) * 260,
+        y: p.y + Math.sin(ang) * 260,
+        angle: ang + Math.PI,
+        speed: 280,
+        color: '#2f6fd6',
+        siren: i * 1.7,
+        stuck: 0,
+      });
+    }
+    m.index = 6;
+    m.stage = 'survive';
+    m.surviveLeft = 18;
+    m.active = true;
+    m.say('The whole force is after you. Survive 30 seconds at 3 wanted stars!');
+    return 'chase';
+  }
+  if (shotName === 'mission') {
+    // Warehouse shootout: player on foot, pistol out, rivals in the docks.
+    p.x = 3000;
+    p.y = 1050;
+    p.onFoot = true;
+    p.inCar = null;
+    p.ammo = 72;
+    p.health = 100;
+    m.index = 4;
+    m.stage = 'fight';
+    m.active = true;
+    m.armedOnce = true;
+    m.armWarehouse(state);
+    m.say('Rivals took the East Docks warehouse. Clear out all 6 armed guards.');
+    state.combat.spawnPickup(3000, 1110, 'health');
+    state.combat.spawnPickup(3000, 990, 'ammo');
+    return 'mission';
+  }
+  return null;
 }
