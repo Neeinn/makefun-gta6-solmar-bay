@@ -1,62 +1,65 @@
-// Keyboard + mouse input: held keys, one-shot actions, aim point.
-export const ACTION_CONFIRM = 1, ACTION_PAUSE = 2, ACTION_ENTER = 4, ACTION_SHOOT = 8;
+// Keyboard and mouse state, with edge-triggered "just pressed" keys.
+export class InputState {
+  constructor() {
+    this.down = new Set();
+    this.pressed = new Set();
+    this.mouseX = 0;
+    this.mouseY = 0;
+    this.mouseDown = false;
+    this.mouseClicked = false;
+    this.anyKey = false;
+  }
 
-const KEYMAP = {
-  KeyW: 'up', ArrowUp: 'up',
-  KeyS: 'down', ArrowDown: 'down',
-  KeyA: 'left', ArrowLeft: 'left',
-  KeyD: 'right', ArrowRight: 'right',
-  ShiftLeft: 'run', ShiftRight: 'run',
-};
+  attach(canvas) {
+    window.addEventListener('keydown', (e) => {
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
+      if (!e.repeat) this.pressed.add(e.key.toLowerCase());
+      this.down.add(e.key.toLowerCase());
+      this.anyKey = true;
+    });
+    window.addEventListener('keyup', (e) => {
+      this.down.delete(e.key.toLowerCase());
+    });
+    canvas.addEventListener('mousemove', (e) => {
+      const r = canvas.getBoundingClientRect();
+      this.mouseX = (e.clientX - r.left) * (canvas.width / r.width);
+      this.mouseY = (e.clientY - r.top) * (canvas.height / r.height);
+    });
+    canvas.addEventListener('mousedown', (e) => {
+      if (e.button === 0) {
+        this.mouseDown = true;
+        this.mouseClicked = true;
+      }
+    });
+    window.addEventListener('mouseup', (e) => {
+      if (e.button === 0) this.mouseDown = false;
+    });
+    window.addEventListener('blur', () => {
+      this.down.clear();
+      this.mouseDown = false;
+    });
+  }
 
-export function createInput(canvas) {
-  const held = new Set();
-  let actions = 0;
-  const mouse = { x: 640, y: 360, down: false };
+  isDown(key) {
+    return this.down.has(key);
+  }
 
-  window.addEventListener('keydown', (e) => {
-    if (KEYMAP[e.code]) {
-      held.add(KEYMAP[e.code]);
-    } else if (e.code === 'Space' || e.code === 'Enter') {
-      if (!e.repeat) actions |= ACTION_CONFIRM;
-    } else if (e.code === 'KeyP' || e.code === 'Escape') {
-      if (!e.repeat) actions |= ACTION_PAUSE;
-    } else if (e.code === 'KeyE') {
-      if (!e.repeat) actions |= ACTION_ENTER;
-    } else if (e.code === 'KeyF') {
-      if (!e.repeat) actions |= ACTION_SHOOT;
-    } else {
-      return;
-    }
-    e.preventDefault();
-  });
-  window.addEventListener('keyup', (e) => {
-    if (KEYMAP[e.code]) held.delete(KEYMAP[e.code]);
-  });
-  window.addEventListener('blur', () => held.clear());
-  canvas.addEventListener('pointermove', (e) => {
-    const r = canvas.getBoundingClientRect();
-    mouse.x = e.clientX - r.left;
-    mouse.y = e.clientY - r.top;
-  });
-  canvas.addEventListener('pointerdown', () => {
-    mouse.down = true;
-    actions |= ACTION_CONFIRM;
-  });
-  canvas.addEventListener('pointerup', () => { mouse.down = false; });
+  wasPressed(key) {
+    return this.pressed.has(key);
+  }
 
-  return {
-    held, mouse,
-    axis() {
-      return {
-        x: (held.has('right') ? 1 : 0) - (held.has('left') ? 1 : 0),
-        y: (held.has('down') ? 1 : 0) - (held.has('up') ? 1 : 0),
-      };
-    },
-    takeActions() {
-      const taken = actions;
-      actions = 0;
-      return taken;
-    },
-  };
+  axis() {
+    let x = 0;
+    let y = 0;
+    if (this.isDown('a') || this.isDown('arrowleft')) x -= 1;
+    if (this.isDown('d') || this.isDown('arrowright')) x += 1;
+    if (this.isDown('w') || this.isDown('arrowup')) y -= 1;
+    if (this.isDown('s') || this.isDown('arrowdown')) y += 1;
+    return { x, y };
+  }
+
+  endFrame() {
+    this.pressed.clear();
+    this.mouseClicked = false;
+  }
 }

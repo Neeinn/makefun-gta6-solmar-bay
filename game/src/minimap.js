@@ -1,60 +1,71 @@
-// MinimapRenderer: city overview with roads, mission marker, player,
-// police and traffic.
-import { CITY } from './config.js';
+// Live minimap: whole city shrunk into the HUD corner, with blips.
+import { CITY_W, CITY_H, DISTRICTS, PARK, BEACH_X, SEA_X } from './config.js';
 
-export function drawMinimap(ctx, x, y, w, h, city, player, missions, wanted, traffic) {
-  const sx = w / CITY.width, sy = h / CITY.height;
+export function drawMinimap(ctx, x, y, size, state) {
+  const s = size / CITY_W;
+  const sy = size / CITY_H;
   ctx.save();
-  ctx.fillStyle = 'rgba(10,14,20,0.85)';
-  ctx.fillRect(x, y, w, h);
-  ctx.strokeStyle = '#ff9f1c';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
-  ctx.fillStyle = '#3f7d44';
-  ctx.fillRect(x + 2, y + 2, w - 4, h - 4);
-  // Sea on the west edge.
-  ctx.fillStyle = '#1d6f8e';
-  ctx.fillRect(x, y, 14, h);
+  ctx.fillStyle = 'rgba(8, 18, 28, 0.82)';
+  ctx.fillRect(x - 4, y - 4, size + 8, size * (CITY_H / CITY_W) + 8);
+  ctx.strokeStyle = '#ffd94d';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x - 4, y - 4, size + 8, size * (CITY_H / CITY_W) + 8);
+  const h = size * (CITY_H / CITY_W);
+  // Land, park, beach, sea.
+  ctx.fillStyle = '#3f7a3a';
+  ctx.fillRect(x, y, size, h);
+  ctx.fillStyle = '#4c8a3f';
+  ctx.fillRect(x + PARK.x * s, y + PARK.y * sy, PARK.w * s, PARK.h * sy);
+  ctx.fillStyle = '#e8cf8f';
+  ctx.fillRect(x + BEACH_X * s, y, (SEA_X - BEACH_X) * s, h);
+  ctx.fillStyle = '#1f7fa8';
+  ctx.fillRect(x + SEA_X * s, y, (CITY_W - SEA_X) * s, h);
   // Roads.
-  ctx.fillStyle = '#2b2e36';
-  for (const rx of city.roadsV) ctx.fillRect(x + rx * sx - 1, y, 2, h);
-  for (const ry of city.roadsH) ctx.fillRect(x, y + ry * sy - 1, w, 2);
-  // Buildings as dots.
-  ctx.fillStyle = 'rgba(220,220,220,0.5)';
-  for (const b of city.buildings) {
-    ctx.fillRect(x + b.x * sx, y + b.y * sy, Math.max(2, b.w * sx), Math.max(2, b.h * sy));
-  }
-  // Mission marker.
-  if (missions && missions.active) {
-    ctx.fillStyle = '#ffd23f';
+  ctx.strokeStyle = 'rgba(220, 220, 220, 0.55)';
+  ctx.lineWidth = 1;
+  for (let gx = 300; gx < CITY_W; gx += 300) {
     ctx.beginPath();
-    ctx.arc(x + missions.active.target.x * sx, y + missions.active.target.y * sy, 6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#fff';
+    ctx.moveTo(x + gx * s, y);
+    ctx.lineTo(x + gx * s, y + h);
     ctx.stroke();
   }
-  // Traffic dots.
-  for (const c of traffic.cars) {
-    if (c.stolen) continue;
-    ctx.fillStyle = '#d8d8d8';
-    ctx.fillRect(x + c.x * sx - 1.5, y + c.y * sy - 1.5, 3, 3);
-  }
-  // Police dots.
-  for (const pc of wanted.police) {
-    ctx.fillStyle = '#3a6fd8';
+  for (let gy = 300; gy < CITY_H; gy += 300) {
     ctx.beginPath();
-    ctx.arc(x + pc.x * sx, y + pc.y * sy, 3, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.moveTo(x, y + gy * sy);
+    ctx.lineTo(x + size, y + gy * sy);
+    ctx.stroke();
   }
+  const blip = (wx, wy, color, r) => {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x + wx * s, y + wy * sy, r, 0, Math.PI * 2);
+    ctx.fill();
+  };
+  // Mission marker.
+  const mark = state.missions.marker(state);
+  if (mark) {
+    const pulse = 4 + Math.sin(state.time * 5) * 1.5;
+    blip(mark.x, mark.y, '#ffd94d', pulse);
+    ctx.strokeStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(x + mark.x * s, y + mark.y * sy, pulse + 3, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  // Police blips.
+  for (const cop of state.wanted.police) blip(cop.x, cop.y, '#4d8dff', 2.5);
   // Player arrow.
-  ctx.fillStyle = '#ffd23f';
-  ctx.beginPath();
-  ctx.arc(x + player.x * sx, y + player.y * sy, 4, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = '#111';
-  ctx.stroke();
+  const px = state.player.inCar ? state.player.inCar.x : state.player.x;
+  const py = state.player.inCar ? state.player.inCar.y : state.player.y;
+  ctx.save();
+  ctx.translate(x + px * s, y + py * sy);
+  ctx.rotate(state.player.angle);
   ctx.fillStyle = '#fff';
-  ctx.font = 'bold 11px system-ui, sans-serif';
-  ctx.fillText('SOLMAR BAY', x + 6, y + 14);
+  ctx.beginPath();
+  ctx.moveTo(6, 0);
+  ctx.lineTo(-4, -4);
+  ctx.lineTo(-4, 4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
   ctx.restore();
 }

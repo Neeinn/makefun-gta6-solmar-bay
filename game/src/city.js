@@ -1,44 +1,61 @@
-// City generation: road grid, building blocks, beach, park and props.
-// Roads run every 300 px; buildings fill the blocks between them.
-import { CITY, DISTRICTS, PALETTE } from './config.js';
-import { pick } from './random.js';
+// City layout: road grid, building blocks, park, beach and sea, district lookup.
+import { CITY_W, CITY_H, DISTRICTS, PARK, BEACH_X, SEA_X, ROAD_STEP, ROAD_W } from './config.js';
+import { makeRng, rangeRng, intRng } from './random.js';
 
-export function createCity(rng) {
-  const roadsV = [];
-  for (let x = 300; x < CITY.width; x += 300) roadsV.push(x);
-  const roadsH = [];
-  for (let y = 300; y < CITY.height; y += 300) roadsH.push(y);
+export function roadCenter(index) {
+  return (index + 1) * ROAD_STEP;
+}
 
+export function isOnRoad(x, y) {
+  const rx = x % ROAD_STEP;
+  const ry = y % ROAD_STEP;
+  const half = ROAD_W / 2;
+  const nearV = rx < half || rx > ROAD_STEP - half;
+  const nearH = ry < half || ry > ROAD_STEP - half;
+  return nearV || nearH;
+}
+
+export function buildCity(seed) {
+  const rng = makeRng(seed);
   const buildings = [];
-  for (let bx = 0; bx < 11; bx++) {
-    for (let by = 0; by < 8; by++) {
-      const x0 = bx * 300 + 40, y0 = by * 300 + 40;
-      if (x0 > 3300 || y0 > 2300) continue;
-      if (bx === 0 && by >= 5) continue; // beach strip stays open on the far west
-      if (bx >= 6 && bx <= 7 && by === 3) continue; // Central Park stays open
-      const count = 1 + Math.floor(rng() * 2);
-      for (let i = 0; i < count; i++) {
-        buildings.push({
-          x: x0 + (i * 130) % 140,
-          y: y0 + Math.floor(i / 2) * 120,
-          w: 90 + rng() * 110,
-          h: 80 + rng() * 100,
-          color: pick(rng, PALETTE.building),
-          roof: rng() < 0.4,
-          floors: 1 + Math.floor(rng() * 6),
-        });
-      }
+  const cols = Math.floor(CITY_W / ROAD_STEP);
+  const rows = Math.floor(CITY_H / ROAD_STEP);
+  const palette = ['#b08d57', '#7d8aa0', '#a06a5a', '#6a8a7d', '#93826a', '#5f7d9a', '#a08a4a', '#8a6a8a'];
+  for (let cx = 0; cx < cols; cx += 1) {
+    for (let cy = 0; cy < rows; cy += 1) {
+      const bx = cx * ROAD_STEP + ROAD_W / 2 + 14;
+      const by = cy * ROAD_STEP + ROAD_W / 2 + 14;
+      const bw = ROAD_STEP - ROAD_W - 28;
+      const bh = ROAD_STEP - ROAD_W - 28;
+      if (bx + bw > BEACH_X - 10) continue; // beach strip stays open
+      if (bx < PARK.x + PARK.w && bx + bw > PARK.x && by < PARK.y + PARK.h && by + bh > PARK.y) continue;
+      if (rng() < 0.12) continue; // empty lot / plaza
+      const tall = rng() < 0.3;
+      buildings.push({
+        x: bx, y: by, w: bw, h: bh,
+        color: palette[intRng(rng, 0, palette.length - 1)],
+        roof: tall ? '#4a4f5e' : '#6e5a44',
+        height: tall ? intRng(rng, 3, 6) : intRng(rng, 1, 2),
+        lit: rng() < 0.5,
+      });
     }
   }
-
   const trees = [];
-  for (let i = 0; i < 220; i++) {
-    trees.push({ x: 60 + rng() * (CITY.width - 120), y: 60 + rng() * (CITY.height - 120), r: 8 + rng() * 8 });
+  for (let i = 0; i < 90; i += 1) {
+    trees.push({
+      x: rangeRng(rng, PARK.x + 20, PARK.x + PARK.w - 20),
+      y: rangeRng(rng, PARK.y + 20, PARK.y + PARK.h - 20),
+      r: rangeRng(rng, 10, 18),
+    });
   }
-  const lamps = [];
-  for (const x of roadsV) for (const y of roadsH) lamps.push({ x: x + 18, y: y + 18 });
-
-  return { roadsV, roadsH, buildings, trees, lamps, park: { x: 1830, y: 930, w: 840, h: 790, cx: 2250, cy: 1320, r: 180 } };
+  for (let i = 0; i < 40; i += 1) {
+    trees.push({
+      x: rangeRng(rng, BEACH_X + 10, SEA_X - 20),
+      y: rangeRng(rng, 100, CITY_H - 100),
+      r: rangeRng(rng, 8, 14),
+    });
+  }
+  return { buildings, trees, cols, rows };
 }
 
 export function districtAt(x, y) {
@@ -48,13 +65,18 @@ export function districtAt(x, y) {
   return 'Solmar Bay';
 }
 
-export function buildingAt(city, x, y, pad) {
-  for (const b of city.buildings) {
-    if (x > b.x - pad && x < b.x + b.w + pad && y > b.y - pad && y < b.y + b.h + pad) return b;
+export function collidesWithBuildings(buildings, x, y, radius) {
+  for (const b of buildings) {
+    if (x + radius > b.x && x - radius < b.x + b.w && y + radius > b.y && y - radius < b.y + b.h) {
+      return b;
+    }
   }
   return null;
 }
 
-export function onRoad(city, x, y) {
-  return city.roadsV.some((rx) => Math.abs(x - rx) < 42) || city.roadsH.some((ry) => Math.abs(y - ry) < 42);
+export function clampToCity(x, y, margin) {
+  return {
+    x: Math.max(margin, Math.min(CITY_W - margin, x)),
+    y: Math.max(margin, Math.min(CITY_H - margin, y)),
+  };
 }
