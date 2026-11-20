@@ -1,101 +1,79 @@
-// Synthesized WebAudio radio: three stations, each its own tempo and pattern.
-// No audio files — every note is generated live with oscillators.
-import { RADIO } from './config.js';
-
-const SCALES = {
-  major: [0, 2, 4, 7, 9],
-  minor: [0, 2, 3, 5, 7, 8, 10],
-};
-
-export class RadioPlayer {
+// audio.js — all sound is synthesized with WebAudio. No audio files.
+export class AudioSys {
   constructor() {
-    this.ctx = null;
-    this.station = 0;
-    this.enabled = false;
-    this.step = 0;
-    this.nextTime = 0;
-    this.master = null;
-    this.muted = false;
+    this.ctx = null; this.master = null; this.engineOsc = null; this.engineGain = null;
+    this.musicTimer = null; this.musicStep = 0; this.sirenOsc = null; this.sirenGain = null;
+    this.muted = false; this.started = false;
   }
-
-  get name() {
-    return RADIO[this.station].name;
-  }
-
-  ensure() {
-    if (this.ctx) return;
+  init() {
+    if (this.started) return;
     try {
       const AC = window.AudioContext || window.webkitAudioContext;
       this.ctx = new AC();
       this.master = this.ctx.createGain();
-      this.master.gain.value = 0.16;
+      this.master.gain.value = 0.5;
       this.master.connect(this.ctx.destination);
-      this.nextTime = this.ctx.currentTime + 0.1;
-    } catch {
-      this.ctx = null;
+      this.engineOsc = this.ctx.createOscillator();
+      this.engineOsc.type = 'sawtooth';
+      this.engineOsc.frequency.value = 50;
+      this.engineGain = this.ctx.createGain();
+      this.engineGain.gain.value = 0.0;
+      const filt = this.ctx.createBiquadFilter();
+      filt.type = 'lowpass'; filt.frequency.value = 700;
+      this.engineOsc.connect(filt); filt.connect(this.engineGain); this.engineGain.connect(this.master);
+      this.engineOsc.start();
+      this.started = true;
+      this.startMusic();
+    } catch (e) { /* audio unavailable: game still plays */ }
+  }
+  startMusic() {
+    if (!this.ctx || this.musicTimer) return;
+    // A slow, sunny bass-and-keys loop in A minor, scheduled step by step.
+    const bass = [55, 0, 55, 0, 65.41, 0, 55, 0, 49, 0, 49, 0, 82.41, 0, 73.42, 0];
+    const lead = [220, 261.63, 329.63, 261.63, 220, 0, 196, 246.94, 220, 261.63, 329.63, 392, 329.63, 261.63, 246.94, 220];
+    this.musicTimer = setInterval(() => {
+      if (!this.ctx || this.muted) return;
+      const i = this.musicStep % 16;
+      this.musicStep++;
+      if (bass[i]) this.note(bass[i], 0.42, 'triangle', 0.16);
+      if (lead[i]) this.note(lead[i], 0.38, 'sine', 0.05);
+      if (i % 4 === 0) this.note(110, 0.1, 'square', 0.03);
+    }, 300);
+  }
+  note(freq, dur, type, vol) {
+    const t = this.ctx.currentTime;
+    const o = this.ctx.createOscillator(); const g = this.ctx.createGain();
+    o.type = type; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(this.master); o.start(t); o.stop(t + dur + 0.02);
+  }
+  setEngine(ratio, inCar) {
+    if (!this.ctx || !this.engineOsc) return;
+    const target = inCar ? 0.05 + ratio * 0.11 : 0.0;
+    this.engineGain.gain.setTargetAtTime(target, this.ctx.currentTime, 0.1);
+    this.engineOsc.frequency.setTargetAtTime(48 + ratio * 130, this.ctx.currentTime, 0.08);
+  }
+  setSiren(on) {
+    if (!this.ctx) return;
+    if (on && !this.sirenOsc) {
+      this.sirenOsc = this.ctx.createOscillator(); this.sirenOsc.type = 'sine';
+      this.sirenGain = this.ctx.createGain(); this.sirenGain.gain.value = 0.035;
+      this.sirenOsc.connect(this.sirenGain); this.sirenGain.connect(this.master);
+      this.sirenOsc.start();
+      let hi = false;
+      this.sirenOsc._iv = setInterval(() => { hi = !hi; this.sirenOsc.frequency.value = hi ? 880 : 660; }, 450);
+    } else if (!on && this.sirenOsc) {
+      clearInterval(this.sirenOsc._iv);
+      try { this.sirenOsc.stop(); } catch (e) {}
+      this.sirenOsc = null; this.sirenGain = null;
     }
   }
-
-  setStation(n) {
-    this.station = ((n % RADIO.length) + RADIO.length) % RADIO.length;
-    this.step = 0;
-  }
-
-  nextStation() {
-    this.setStation(this.station + 1);
-  }
-
-  toggleMute() {
-    this.muted = !this.muted;
-    if (this.master) this.master.gain.value = this.muted ? 0 : 0.16;
-  }
-
-  note(freq, when, dur, type, vol) {
+  shoot() { if (this.ctx) { this.note(900, 0.09, 'square', 0.12); this.note(180, 0.12, 'sawtooth', 0.1); } }
+  punch() { if (this.ctx) this.note(90, 0.12, 'sine', 0.22); }
+  ding() { if (this.ctx) { this.note(880, 0.15, 'sine', 0.12); setTimeout(() => this.note(1318, 0.25, 'sine', 0.12), 110); } }
+  crash() { if (this.ctx) this.note(70, 0.25, 'sawtooth', 0.2); }
+  missionDone() {
     if (!this.ctx) return;
-    const osc = this.ctx.createOscillator();
-    const g = this.ctx.createGain();
-    osc.type = type;
-    osc.frequency.value = freq;
-    g.gain.setValueAtTime(0.0001, when);
-    g.gain.exponentialRampToValueAtTime(vol, when + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
-    osc.connect(g);
-    g.connect(this.master);
-    osc.start(when);
-    osc.stop(when + dur + 0.05);
-  }
-
-  schedule(dt) {
-    if (!this.ctx || !this.enabled || this.muted) return;
-    const st = RADIO[this.station];
-    const beat = 60 / st.bpm / 2; // eighth notes
-    while (this.nextTime < this.ctx.currentTime + 0.25) {
-      const scale = st.minor ? SCALES.minor : SCALES.major;
-      const stepInBar = this.step % 16;
-      // Bass on beats 0, 4, 8, 12 (root, or fifth on 8).
-      if (stepInBar % 4 === 0) {
-        const f = st.root * (stepInBar === 8 ? 1.5 : 1);
-        this.note(f, this.nextTime, beat * 2.2, 'sine', 0.5);
-      }
-      // Lead pluck: pentatonic wander, denser on the fast station.
-      const density = st.bpm > 120 ? 0.62 : st.bpm > 90 ? 0.45 : 0.34;
-      if (Math.random() < density) {
-        const deg = scale[Math.floor(Math.random() * scale.length)];
-        const oct = Math.random() < 0.3 ? 4 : 2;
-        const f = st.root * oct * Math.pow(2, deg / 12);
-        this.note(f, this.nextTime, beat * 1.4, st.wave, 0.22);
-      }
-      // Hat tick on off-beats for the fast station.
-      if (st.bpm > 120 && stepInBar % 2 === 1) {
-        this.note(5200, this.nextTime, 0.03, 'square', 0.05);
-      }
-      this.step += 1;
-      this.nextTime += beat;
-    }
-  }
-
-  blip(freq, dur) {
-    if (!this.ctx) return;
-    this.note(freq, this.ctx.currentTime, dur, 'square', 0.12);
+    [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => this.note(f, 0.3, 'triangle', 0.14), i * 130));
   }
 }

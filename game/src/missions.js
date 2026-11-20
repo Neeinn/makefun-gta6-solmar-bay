@@ -1,263 +1,273 @@
-// The 8 story missions, in order, with objectives, markers and payouts.
-import { MISSION_DEFS } from './config.js';
-
-export const SPOTS = {
-  taxiStand: { x: 1800, y: 300, label: 'Taxi stand' },
-  palmFare: { x: 1800, y: 300, label: 'Fare at Palm Court' },
-  pier: { x: 3350, y: 2150, label: 'Solmar Pier' },
-  cannery: { x: 1200, y: 300, label: 'Old Cannery warehouse' },
-  dinaHome: { x: 1800, y: 300, label: "Dina's place" },
-  neonClub: { x: 2400, y: 1500, label: 'Neon Mile club' },
-  raceStart: { x: 1800, y: 900, label: 'Race start' },
-  docks: { x: 3000, y: 900, label: 'East Docks warehouse' },
-  pierEnd: { x: 3350, y: 2250, label: 'Pier End' },
-};
-
-export const RACE_POINTS = [
-  { x: 1800, y: 300 },
-  { x: 3000, y: 300 },
-  { x: 3000, y: 1500 },
-  { x: 600, y: 2100 },
-  { x: 1800, y: 900 },
+// missions.js — eight original story missions for Milo Ferran in Solmar Bay.
+export const MISSIONS = [
+  {
+    id: 1, name: 'Morning Run', giver: 'Bayline Couriers',
+    brief: 'Deliver the sealed parcel to the cafe in Coral Point. Do not open it.',
+    steps: [{ type: 'goto', x: 80, z: -150, text: 'Go to the Coral Point cafe (orange marker).' }],
+    reward: 150,
+  },
+  {
+    id: 2, name: 'Hot Wheels', giver: 'Lena Torres',
+    brief: 'Lena needs a fast car for her garage. Take any car and bring it to Marina Verde.',
+    steps: [
+      { type: 'enterCar', text: 'Get in any car (press E near one).' },
+      { type: 'goto', x: 80, z: -40, text: 'Drive the car to Lena\'s garage in Marina Verde.' },
+    ],
+    reward: 250,
+  },
+  {
+    id: 3, name: 'Dockside Pickup', giver: 'Dario Sol',
+    brief: 'Three crates are waiting at the North Docks. Collect them all before the harbour patrol notices.',
+    steps: [
+      { type: 'collect', x: -60, z: -160, text: 'Collect crate 1 of 3 at the North Docks.' },
+      { type: 'collect', x: -20, z: -170, text: 'Collect crate 2 of 3 at the North Docks.' },
+      { type: 'collect', x: -40, z: -140, text: 'Collect crate 3 of 3 at the North Docks.' },
+    ],
+    reward: 300,
+  },
+  {
+    id: 4, name: 'Tail the Van', giver: 'Detective Mara Ives',
+    brief: 'A white van is moving Tide cargo through Bayview. Follow it for 20 seconds. Do not get spotted close up.',
+    steps: [{ type: 'tail', x: -40, z: -40, text: 'Follow the white van — stay within 40 m for 20 s.' }],
+    reward: 350,
+  },
+  {
+    id: 5, name: 'Alley Trouble', giver: 'Lena Torres',
+    brief: 'Rival crew the Rust Jackals are shaking down Palm Court shops. Teach three of them a lesson.',
+    steps: [{ type: 'eliminate', x: 160, z: -40, count: 3, text: 'Defeat 3 Rust Jackals in Palm Court (F punch / click shoot).' }],
+    reward: 400,
+  },
+  {
+    id: 6, name: 'Midnight Race', giver: 'Dario Sol',
+    brief: 'Street race across the city: hit 4 checkpoints before the timer runs out.',
+    steps: [{ type: 'race', x: 0, z: 0, text: 'Race! Hit the checkpoints before time runs out.' }],
+    reward: 500,
+  },
+  {
+    id: 7, name: 'The Swap', giver: 'Detective Mara Ives',
+    brief: 'Carry the evidence parcel to Lighthouse Hill. The Tide tipped off the police — expect company.',
+    steps: [{ type: 'goto', x: 160, z: -150, text: 'Deliver the parcel to Lighthouse Hill. Police are watching.' }],
+    reward: 450,
+  },
+  {
+    id: 8, name: 'Tide Breaker', giver: 'Milo Ferran',
+    brief: 'End it. Clear the four Tide guards at the Old Port, then reach the boat and leave Solmar Bay behind.',
+    steps: [
+      { type: 'eliminate', x: -160, z: -40, count: 4, text: 'Defeat 4 Tide guards at the Old Port.' },
+      { type: 'goto', x: -160, z: -160, text: 'Reach the boat at Harbor Lights.' },
+    ],
+    reward: 1000,
+  },
 ];
 
-export class MissionRunner {
-  constructor() {
-    this.index = 0; // 0-based mission index; 8 = story complete
-    this.stage = 'go'; // go | carry | drop | race | fight | survive | done
-    this.timer = 0;
-    this.racePoint = 0;
-    this.faresDone = 0;
-    this.fareStage = 'pickup';
-    this.fareSpot = null;
-    this.dropSpot = null;
-    this.enemiesLeft = 0;
-    this.surviveLeft = 30;
-    this.message = '';
-    this.messageTimer = 0;
-    this.completed = [];
-    this.active = false;
-  }
+let beacon = null;
+let pickups = [];
+let tailVan = null;
+let racePoints = [];
+let raceTimer = 0;
 
-  get current() {
-    return MISSION_DEFS[this.index] || null;
-  }
+export function currentMission(ctx) {
+  return MISSIONS[ctx.missionIndex] || null;
+}
 
-  get done() {
-    return this.index >= MISSION_DEFS.length;
-  }
+export function startMission(ctx) {
+  const m = currentMission(ctx);
+  if (!m) { ctx.hud.toast('All missions complete! You own Solmar Bay.'); return; }
+  if (ctx.missionActive) return;
+  ctx.missionActive = true;
+  ctx.missionStep = 0;
+  ctx.missionProgress = 0;
+  ctx.missionTimer = 0;
+  ctx.missionEnemiesSpawned = 0;
+  clearMissionObjects(ctx);
+  ctx.hud.setObjective(m.name, m.steps[0].text);
+  ctx.hud.toast('Mission started: ' + m.name);
+  setupStep(ctx);
+}
 
-  start(state) {
-    this.active = true;
-    this.stage = 'go';
-    this.timer = 0;
-    this.racePoint = 0;
-    this.faresDone = 0;
-    this.enemiesLeft = 0;
-    this.armedOnce = false;
-    const m = this.current;
-    if (!m) return;
-    if (m.id === 4) this.stage = 'race';
-    if (m.id === 5) this.stage = 'fight';
-    if (m.id === 7) this.stage = 'survive';
-    if (m.id === 8) this.stage = 'fight';
-    if (m.id === 3) this.timer = m.timeLimit;
-    if (m.id === 6) this.stage = 'fare';
-    if (m.id === 5) this.armWarehouse(state);
-    if (m.id === 8) this.armFinale(state);
-    if (m.id === 6) this.beginFares(state);
-    if (m.id === 7) state.wanted.setStars(3);
-    this.say(`Mission ${m.id}: ${m.title} — ${m.brief}`);
-  }
+function clearMissionObjects(ctx) {
+  if (beacon) { ctx.scene.remove(beacon); beacon = null; }
+  for (const p of pickups) ctx.scene.remove(p);
+  pickups = [];
+  if (tailVan) { ctx.scene.remove(tailVan.mesh); tailVan = null; }
+  for (const r of racePoints) ctx.scene.remove(r);
+  racePoints = [];
+  for (const e of ctx.enemies) ctx.scene.remove(e.mesh);
+  ctx.enemies = [];
+}
 
-  say(text) {
-    this.message = text;
-    this.messageTimer = 6;
-  }
+export function makeBeacon(ctx, x, z, color) {
+  if (beacon) ctx.scene.remove(beacon);
+  const group = new THREE.Group();
+  const cyl = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.2, 1.2, 26, 12, 1, true),
+    new THREE.MeshBasicMaterial({ color: color || 0xffa500, transparent: true, opacity: 0.35, side: THREE.DoubleSide })
+  );
+  cyl.position.y = 13; group.add(cyl);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(2.2, 0.25, 8, 24), new THREE.MeshBasicMaterial({ color: color || 0xffa500 }));
+  ring.rotation.x = Math.PI / 2; ring.position.y = 0.3; group.add(ring);
+  group.position.set(x, 0, z);
+  ctx.scene.add(group);
+  beacon = group;
+  return group;
+}
 
-  armWarehouse(state) {
-    const spots = [
-      [3000, 780], [2940, 900], [3060, 930], [2910, 900],
-      [3030, 1020], [2970, 1080],
-    ];
-    for (const [x, y] of spots) state.combat.spawnEnemy(x, y, { name: 'Dock Rival' });
-    this.enemiesLeft = spots.length;
-    this.armedOnce = true;
-  }
+function spawnEnemy(ctx, x, z) {
+  const group = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.0, 0.45), new THREE.MeshLambertMaterial({ color: 0x8b0000 }));
+  body.position.y = 1.0; group.add(body);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshLambertMaterial({ color: 0xe8b88a }));
+  head.position.y = 1.8; group.add(head);
+  group.position.set(x, 0, z);
+  ctx.scene.add(group);
+  const e = { mesh: group, pos: group.position, health: 60, kind: 'enemy', speed: 3.2 };
+  ctx.enemies.push(e);
+  return e;
+}
 
-  armFinale(state) {
-    const spots = [
-      [3340, 2180], [3400, 2260], [3360, 2340], [3420, 2140],
-      [3380, 2400], [3440, 2300], [3320, 2200], [3400, 2440],
-    ];
-    for (let i = 0; i < spots.length; i += 1) {
-      state.combat.spawnEnemy(spots[i][0], spots[i][1], {
-        name: i === 0 ? 'Salvo' : 'Salvo Crew', boss: i === 0,
-      });
+function setupStep(ctx) {
+  const m = currentMission(ctx);
+  if (!m) return;
+  const step = m.steps[ctx.missionStep];
+  if (!step) return;
+  ctx.hud.setObjective(m.name, step.text);
+  if (step.type === 'goto' || step.type === 'collect' || step.type === 'eliminate') {
+    makeBeacon(ctx, step.x, step.z);
+  }
+  if (step.type === 'collect') {
+    const box = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.2, 1.2), new THREE.MeshLambertMaterial({ color: 0xd9a441 }));
+    box.position.set(step.x, 0.6, step.z);
+    ctx.scene.add(box);
+    pickups.push(box);
+  }
+  if (step.type === 'eliminate') {
+    for (let i = 0; i < step.count; i++) spawnEnemy(ctx, step.x + (i - 1) * 5, step.z + (i % 2) * 6 - 3);
+    ctx.missionEnemiesSpawned = step.count;
+  }
+  if (step.type === 'tail') {
+    const { createCarMesh } = ctx.vehicleApi;
+    const mesh = createCarMesh(0xffffff);
+    mesh.position.set(step.x, 0, step.z);
+    ctx.scene.add(mesh);
+    tailVan = { mesh, pos: mesh.position, heading: 0, speed: 9, kind: 'van' };
+    makeBeacon(ctx, step.x, step.z, 0xffffff);
+  }
+  if (step.type === 'race') {
+    raceTimer = 90;
+    const pts = [[-80, -80], [80, -80], [80, 80], [-80, 80]];
+    racePoints = pts.map(([x, z]) => {
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(3, 0.35, 8, 24), new THREE.MeshBasicMaterial({ color: 0x00ff88 }));
+      ring.rotation.x = Math.PI / 2; ring.position.set(x, 1, z);
+      ctx.scene.add(ring);
+      return ring;
+    });
+    ctx.raceCheckpoints = pts.map(([x, z]) => ({ x, z, done: false }));
+    makeBeacon(ctx, pts[0][0], pts[0][1], 0x00ff88);
+  }
+  if (step.type === 'goto' && m.id === 7) {
+    ctx.playerApi.addWanted(ctx, 1); // the swap is watched
+  }
+}
+
+export function updateMissions(ctx, dt) {
+  if (!ctx.missionActive) return;
+  const m = currentMission(ctx);
+  if (!m) return;
+  const step = m.steps[ctx.missionStep];
+  if (!step) return;
+  const p = ctx.player.pos;
+  ctx.missionTimer += dt;
+  if (beacon) beacon.rotation.y += dt;
+
+  if (step.type === 'goto') {
+    if (Math.hypot(p.x - step.x, p.z - step.z) < 5) advanceStep(ctx);
+  } else if (step.type === 'enterCar') {
+    if (ctx.player.inCar) advanceStep(ctx);
+  } else if (step.type === 'collect') {
+    if (Math.hypot(p.x - step.x, p.z - step.z) < 3) {
+      const box = pickups.pop();
+      if (box) ctx.scene.remove(box);
+      ctx.audio.ding();
+      ctx.player.money += 40;
+      advanceStep(ctx);
     }
-    this.enemiesLeft = spots.length;
-    this.armedOnce = true;
-  }
-
-  // Where the marker should point right now, or null.
-  marker(state) {
-    const m = this.current;
-    if (!m || this.done) return null;
-    if (m.id === 1) return this.stage === 'go' ? SPOTS.palmFare : SPOTS.pier;
-    if (m.id === 2) return this.stage === 'go' ? SPOTS.cannery : SPOTS.dinaHome;
-    if (m.id === 3) return SPOTS.neonClub;
-    if (m.id === 4) return RACE_POINTS[this.racePoint];
-    if (m.id === 5) return SPOTS.docks;
-    if (m.id === 6) return this.fareStage === 'pickup' ? this.fareSpot : this.dropSpot;
-    if (m.id === 7) return null;
-    if (m.id === 8) return SPOTS.pierEnd;
-    return null;
-  }
-
-  objectiveText() {
-    const m = this.current;
-    if (!m) return 'Story complete! Free roam Solmar Bay — drive, earn fares, dodge the law.';
-    if (m.id === 1) return this.stage === 'go' ? 'Pick up the fare at Palm Court (follow the yellow marker)' : 'Drop the fare at Solmar Pier';
-    if (m.id === 2) return this.stage === 'go' ? 'Pick up the package at the Old Cannery warehouse' : 'Bring the package back to Dina';
-    if (m.id === 3) return `Deliver the package to the Neon Mile club — ${Math.ceil(this.timer)}s left`;
-    if (m.id === 4) return `Race! Checkpoint ${this.racePoint + 1} of 5 — follow the markers`;
-    if (m.id === 5) return `Clear the East Docks warehouse — ${this.enemiesLeft} rivals left`;
-    if (m.id === 6) return this.fareStage === 'pickup' ? `Fare ${this.faresDone + 1} of 3: pick up the passenger` : `Fare ${this.faresDone + 1} of 3: drop them off`;
-    if (m.id === 7) return `Survive at 3 stars — ${Math.ceil(this.surviveLeft)}s left`;
-    if (m.id === 8) return `Final showdown: take down Salvo and his crew — ${this.enemiesLeft} left`;
-    return m.brief;
-  }
-
-  completeMission(state) {
-    const m = this.current;
-    if (!m) return;
-    state.player.earn(m.pay);
-    this.completed.push(m.id);
-    this.say(`Mission complete: ${m.title} — earned $${m.pay}!`);
-    state.economy.recordMission(m.pay);
-    this.index += 1;
-    this.active = false;
-    state.wanted.clear();
-    state.combat.enemies.length = 0;
-    if (!this.done) {
-      this.start(state);
-    } else {
-      this.say('STORY COMPLETE — you are the King of the Bay! Free roam unlocked.');
-    }
-  }
-
-  failMission(state, reason) {
-    this.say(`${reason} Mission failed — try again (press R to restart it).`);
-    this.active = false;
-    state.wanted.clear();
-    state.combat.enemies.length = 0;
-  }
-
-  // Called every frame; returns nothing, mutates state.
-  update(dt, state) {
-    if (this.messageTimer > 0) this.messageTimer -= dt;
-    if (!this.active || this.done) return;
-    const m = this.current;
-    const p = state.player;
-    const px = p.inCar ? p.inCar.x : p.x;
-    const py = p.inCar ? p.inCar.y : p.y;
-    if (m.id === 3) {
-      this.timer -= dt;
-      if (this.timer <= 0) {
-        this.failMission(state, 'Too slow — the delivery went cold.');
-        return;
-      }
-    }
-    if (m.id === 7) {
-      this.surviveLeft -= dt;
-      state.wanted.setStars(3);
-      if (this.surviveLeft <= 0) {
-        this.completeMission(state);
-        return;
-      }
-    }
-    const mark = this.marker(state);
-    if (mark && Math.hypot(mark.x - px, mark.y - py) < 70) {
-      this.reachMarker(state);
-    }
-    if ((m.id === 5 || m.id === 8) && this.stage === 'fight') {
-      this.enemiesLeft = state.combat.enemies.length;
-      if (this.enemiesLeft === 0 && state.combat.enemies.length === 0 && this.armedOnce) {
-        this.completeMission(state);
-      }
-    }
-    if (m.id === 4 && this.stage === 'race') {
-      const cp = RACE_POINTS[this.racePoint];
-      if (cp && Math.hypot(cp.x - px, cp.y - py) < 80) {
-        this.racePoint += 1;
-        this.say(`Checkpoint ${this.racePoint} of 5!`);
-        if (this.racePoint >= RACE_POINTS.length) this.completeMission(state);
-      }
-    }
-  }
-
-  reachMarker(state) {
-    const m = this.current;
-    if (!m) return;
-    if (m.id === 1) {
-      if (this.stage === 'go') {
-        this.stage = 'carry';
-        this.say('Fare picked up. Drive them to Solmar Pier.');
-      } else {
-        this.completeMission(state);
-      }
-    } else if (m.id === 2) {
-      if (this.stage === 'go') {
-        this.stage = 'carry';
-        this.say('Package collected. Take it back to Dina.');
-      } else {
-        this.completeMission(state);
-      }
-    } else if (m.id === 3) {
-      this.completeMission(state);
-    } else if (m.id === 6) {
-      if (this.fareStage === 'pickup') {
-        this.fareStage = 'drop';
-        this.dropSpot = this.pickDropSpot(state);
-        this.say(`Passenger aboard. Drop them at ${this.dropSpot.label}.`);
-      } else {
-        this.faresDone += 1;
-        state.player.earn(80);
-        state.economy.recordFare(80);
-        if (this.faresDone >= 3) {
-          this.completeMission(state);
-        } else {
-          this.fareStage = 'pickup';
-          this.fareSpot = this.pickFareSpot(state);
-          this.say(`Fare ${this.faresDone} done (+$80). Next passenger is waiting.`);
+  } else if (step.type === 'tail' && tailVan) {
+    // The van cruises a loop around Bayview.
+    tailVan.heading += dt * 0.25;
+    tailVan.pos.x += Math.sin(tailVan.heading) * tailVan.speed * dt;
+    tailVan.pos.z += Math.cos(tailVan.heading) * tailVan.speed * dt;
+    tailVan.mesh.rotation.y = tailVan.heading;
+    if (beacon) beacon.position.set(tailVan.pos.x, 0, tailVan.pos.z);
+    const d = Math.hypot(p.x - tailVan.pos.x, p.z - tailVan.pos.z);
+    if (d < 40) ctx.missionProgress += dt;
+    else ctx.missionProgress = Math.max(0, ctx.missionProgress - dt);
+    ctx.hud.setObjective(m.name, step.text + ' (' + Math.floor(ctx.missionProgress) + ' / 20 s)');
+    if (ctx.missionProgress >= 20) advanceStep(ctx);
+  } else if (step.type === 'eliminate') {
+    // Enemies walk toward the player and punch when close.
+    for (const e of ctx.enemies) {
+      const dx = p.x - e.pos.x, dz = p.z - e.pos.z;
+      const d = Math.hypot(dx, dz) || 1;
+      if (d < 14) {
+        e.pos.x += (dx / d) * e.speed * dt;
+        e.pos.z += (dz / d) * e.speed * dt;
+        e.mesh.rotation.y = Math.atan2(dx, dz);
+        if (d < 1.8) {
+          ctx.player.health -= 8 * dt;
+          if (ctx.player.health <= 0) ctx.gameOver('The Rust Jackals / Tide guards got you.');
         }
       }
     }
+    const need = step.count;
+    const down = need - ctx.enemies.length;
+    ctx.hud.setObjective(m.name, step.text + ' — down: ' + Math.max(0, down) + '/' + need);
+    if (ctx.missionEnemiesSpawned > 0 && ctx.enemies.length === 0) advanceStep(ctx);
+  } else if (step.type === 'race') {
+    raceTimer -= dt;
+    const next = ctx.raceCheckpoints.find((c) => !c.done);
+    if (next) {
+      if (beacon) beacon.position.set(next.x, 0, next.z);
+      if (Math.hypot(p.x - next.x, p.z - next.z) < 5) {
+        next.done = true;
+        ctx.audio.ding();
+        ctx.hud.toast('Checkpoint!');
+      }
+      const left = ctx.raceCheckpoints.filter((c) => !c.done).length;
+      ctx.hud.setObjective(m.name, 'Checkpoints left: ' + left + ' — time: ' + Math.max(0, Math.ceil(raceTimer)) + ' s');
+      if (left === 0) advanceStep(ctx);
+    }
+    if (raceTimer <= 0) {
+      ctx.hud.toast('Race failed — time up. Press M to retry.');
+      ctx.missionActive = false;
+      clearMissionObjects(ctx);
+      ctx.hud.setObjective('Free Roam', 'Press M to start a mission.');
+    }
   }
+}
 
-  pickFareSpot(state) {
-    const spots = [
-      { x: 600, y: 300, label: 'Marina Point' },
-      { x: 2400, y: 300, label: 'Palm Court' },
-      { x: 600, y: 1500, label: 'Harbor Lights' },
-      { x: 2400, y: 2100, label: 'Pier End' },
-    ];
-    return spots[(this.faresDone + state.player.money) % spots.length] || spots[0];
+function advanceStep(ctx) {
+  const m = currentMission(ctx);
+  ctx.missionStep++;
+  ctx.missionProgress = 0;
+  if (ctx.missionStep >= m.steps.length) {
+    ctx.missionActive = false;
+    clearMissionObjects(ctx);
+    ctx.player.money += m.reward;
+    ctx.missionsDone++;
+    ctx.missionIndex++;
+    ctx.audio.missionDone();
+    ctx.hud.toast('Mission complete! +$' + m.reward);
+    ctx.hud.setObjective('Free Roam', 'Press M for the next mission (' + (ctx.missionIndex + 1) + ' of 8).');
+    if (ctx.missionIndex >= MISSIONS.length) {
+      ctx.hud.setObjective('Story Complete', 'You finished all 8 missions. Solmar Bay is yours.');
+    }
+  } else {
+    ctx.audio.ding();
+    setupStep(ctx);
   }
+}
 
-  pickDropSpot(state) {
-    const spots = [
-      { x: 3000, y: 300, label: 'Coral Heights' },
-      { x: 600, y: 900, label: 'Harbor Lights' },
-      { x: 1800, y: 2100, label: 'South Beach' },
-      { x: 3000, y: 1500, label: 'East Docks' },
-    ];
-    return spots[(this.faresDone * 2 + 1) % spots.length] || spots[0];
-  }
-
-  // Begin mission 6's first fare and arm flags used by the fight missions.
-  beginFares(state) {
-    this.fareSpot = this.pickFareSpot(state);
-    this.fareStage = 'pickup';
-  }
+export function abortMission(ctx) {
+  ctx.missionActive = false;
+  clearMissionObjects(ctx);
 }

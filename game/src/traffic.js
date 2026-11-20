@@ -1,142 +1,110 @@
-// Traffic cars and pedestrians wandering the city.
-import { CITY_W, CITY_H, ROAD_STEP, CAR_MAX_SPEED } from './config.js';
-import { makeRng, rangeRng, intRng, pickFrom } from './random.js';
-import { roadCenter, isOnRoad, collidesWithBuildings } from './city.js';
+// traffic.js — traffic cars driving the road grid and pedestrians on the sidewalks.
+import { ROAD_COORDS, collideCircle } from './city.js';
+import { createCarMesh } from './vehicles.js';
 
-const CAR_COLORS = ['#d64545', '#3d7dd6', '#e8c93d', '#e8e8e8', '#3d3d3d', '#6ab04c', '#d67db0', '#7d5ad6', '#e07b2e'];
-const PED_COLORS = ['#e8a0a0', '#a0c8e8', '#c8e8a0', '#e8d0a0', '#d0a0e8', '#a0e8d8', '#f0f0f0', '#c08050'];
-const CAR_NAMES = ['Comet', 'Vagabond', 'Sunrunner', 'Marlin', 'Prowler', 'Dune Buggy', 'Harbor Van', 'City Cab'];
+const TRAFFIC_COLORS = [0xbbbbbb, 0x555555, 0x8a3324, 0x2f5d50, 0xc9a227, 0x7a7a9a];
 
-export function spawnTrafficCars(seed, count) {
-  const rng = makeRng(seed + 101);
-  const cars = [];
-  const cols = Math.floor(CITY_W / ROAD_STEP);
-  const rows = Math.floor(CITY_H / ROAD_STEP);
-  for (let i = 0; i < count; i += 1) {
-    const horizontal = rng() < 0.5;
-    const lane = intRng(rng, 0, horizontal ? rows - 2 : cols - 2);
-    const along = rangeRng(rng, 100, (horizontal ? CITY_W : CITY_H) - 100);
-    const dir = rng() < 0.5 ? 1 : -1;
-    const x = horizontal ? along : roadCenter(lane) + (dir > 0 ? 12 : -12);
-    const y = horizontal ? roadCenter(lane) + (dir > 0 ? 12 : -12) : along;
-    cars.push({
-      id: i,
-      kind: 'traffic',
-      name: pickFrom(rng, CAR_NAMES),
-      x, y,
-      angle: horizontal ? (dir > 0 ? 0 : Math.PI) : (dir > 0 ? Math.PI / 2 : -Math.PI / 2),
-      speed: rangeRng(rng, 90, 170),
-      color: pickFrom(rng, CAR_COLORS),
-      taxi: rng() < 0.14,
-      parked: false,
-      horizontal, lane, dir,
-      wobble: rng() * Math.PI * 2,
+export function spawnTraffic(ctx, count) {
+  const list = [];
+  for (let i = 0; i < count; i++) {
+    const vertical = i % 2 === 0;
+    const road = ROAD_COORDS[1 + (i % (ROAD_COORDS.length - 2))];
+    const mesh = createCarMesh(TRAFFIC_COLORS[i % TRAFFIC_COLORS.length]);
+    const pos = new THREE.Vector3(
+      vertical ? road + (i % 4 < 2 ? 2.4 : -2.4) : -170 + (i * 37) % 340,
+      0,
+      vertical ? -170 + (i * 53) % 340 : road + (i % 4 < 2 ? 2.4 : -2.4)
+    );
+    mesh.position.copy(pos);
+    ctx.scene.add(mesh);
+    list.push({
+      mesh, pos, heading: vertical ? (i % 4 < 2 ? 0 : Math.PI) : (i % 4 < 2 ? Math.PI / 2 : -Math.PI / 2),
+      speed: 7 + (i % 4), vertical, road, kind: 'traffic', health: 100,
     });
   }
-  return cars;
+  return list;
 }
 
-export function spawnParkedCars(seed, count, buildings) {
-  const rng = makeRng(seed + 202);
-  const cars = [];
-  let tries = 0;
-  while (cars.length < count && tries < 600) {
-    tries += 1;
-    const x = rangeRng(rng, 120, CITY_W - 300);
-    const y = rangeRng(rng, 120, CITY_H - 120);
-    if (!isOnRoad(x, y)) continue;
-    if (collidesWithBuildings(buildings, x, y, 26)) continue;
-    if (cars.some((c) => Math.hypot(c.x - x, c.y - y) < 90)) continue;
-    cars.push({
-      id: 1000 + cars.length,
-      kind: 'parked',
-      name: pickFrom(rng, CAR_NAMES),
-      x, y,
-      angle: pickFrom(rng, [0, Math.PI / 2, Math.PI, -Math.PI / 2]),
-      speed: 0,
-      color: pickFrom(rng, CAR_COLORS),
-      taxi: rng() < 0.2,
-      parked: true,
-      horizontal: rng() < 0.5,
-      lane: 0, dir: 1,
+export function updateTraffic(ctx, dt) {
+  for (const t of ctx.traffic) {
+    t.pos.x += Math.sin(t.heading) * t.speed * dt;
+    t.pos.z += Math.cos(t.heading) * t.speed * dt;
+    // At the edge of the map, turn around at the next intersection.
+    if (t.pos.x > 185 || t.pos.x < -185 || t.pos.z > 185 || t.pos.z < -185) {
+      t.heading += Math.PI;
+      t.pos.x = Math.max(-185, Math.min(185, t.pos.x));
+      t.pos.z = Math.max(-185, Math.min(185, t.pos.z));
+    }
+    // Random turn at intersections (keeps traffic spread across the grid).
+    const nearX = Math.abs(t.pos.x - Math.round(t.pos.x / 40) * 40) < 0.6;
+    const nearZ = Math.abs(t.pos.z - Math.round(t.pos.z / 40) * 40) < 0.6;
+    if (nearX && nearZ && Math.random() < dt * 0.25) {
+      t.heading += (Math.random() < 0.5 ? Math.PI / 2 : -Math.PI / 2);
+      t.vertical = !t.vertical;
+    }
+    // Slow down if the player car is right ahead.
+    if (ctx.player.inCar) {
+      const d = Math.hypot(t.pos.x - ctx.player.pos.x, t.pos.z - ctx.player.pos.z);
+      if (d < 7) t.speed = Math.max(0, t.speed - 10 * dt);
+      else t.speed = Math.min(9, t.speed + 4 * dt);
+    }
+    t.mesh.position.copy(t.pos);
+    t.mesh.rotation.y = t.heading;
+  }
+}
+
+export function spawnPeds(ctx, count) {
+  const list = [];
+  const shirt = [0xe63946, 0x457b9d, 0x2a9d8f, 0xf4a261, 0xe9c46a, 0x9d4edd];
+  for (let i = 0; i < count; i++) {
+    const group = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.8, 0.35), new THREE.MeshLambertMaterial({ color: shirt[i % shirt.length] }));
+    body.position.y = 1.0; group.add(body);
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.42), new THREE.MeshLambertMaterial({ color: 0xd9a066 }));
+    head.position.y = 1.65; group.add(head);
+    const road = ROAD_COORDS[i % ROAD_COORDS.length];
+    const vertical = i % 2 === 0;
+    group.position.set(
+      vertical ? road + 6.5 : -180 + (i * 29) % 360,
+      0,
+      vertical ? -180 + (i * 41) % 360 : road + 6.5
+    );
+    ctx.scene.add(group);
+    list.push({
+      mesh: group, heading: vertical ? 0 : Math.PI / 2, speed: 1.2 + (i % 3) * 0.4,
+      phase: Math.random() * 6, vertical, kind: 'ped', health: 100,
     });
   }
-  return cars;
+  return list;
 }
 
-export function updateTrafficCar(car, dt, rngJitter) {
-  if (car.parked) return;
-  const step = car.speed * car.dir * dt;
-  if (car.horizontal) {
-    car.x += step;
-    if (car.x > CITY_W - 60) { car.x = CITY_W - 60; car.dir = -1; car.angle = Math.PI; }
-    if (car.x < 60) { car.x = 60; car.dir = 1; car.angle = 0; }
-    car.y = roadCenter(car.lane) + (car.dir > 0 ? 12 : -12) + Math.sin(car.wobble) * 2;
-  } else {
-    car.y += step;
-    if (car.y > CITY_H - 60) { car.y = CITY_H - 60; car.dir = -1; car.angle = -Math.PI / 2; }
-    if (car.y < 60) { car.y = 60; car.dir = 1; car.angle = Math.PI / 2; }
-    car.x = roadCenter(car.lane) + (car.dir > 0 ? 12 : -12) + Math.sin(car.wobble) * 2;
+export function updatePeds(ctx, dt) {
+  for (const p of ctx.peds) {
+    p.mesh.position.x += Math.sin(p.heading) * p.speed * dt;
+    p.mesh.position.z += Math.cos(p.heading) * p.speed * dt;
+    p.phase += dt * 4;
+    p.mesh.rotation.y = p.heading;
+    p.mesh.position.y = Math.abs(Math.sin(p.phase)) * 0.08;
+    if (p.mesh.position.x > 190 || p.mesh.position.x < -190 || p.mesh.position.z > 250 || p.mesh.position.z < -190) {
+      p.heading += Math.PI;
+    }
+    // Flee from a speeding player car nearby.
+    if (ctx.player.inCar && Math.abs(ctx.player.inCar.speed) > 8) {
+      const d = Math.hypot(p.mesh.position.x - ctx.player.pos.x, p.mesh.position.z - ctx.player.pos.z);
+      if (d < 6) {
+        p.heading = Math.atan2(p.mesh.position.x - ctx.player.pos.x, p.mesh.position.z - ctx.player.pos.z);
+        p.speed = 4;
+      } else { p.speed = 1.4; }
+    }
+    // Run over by the player car: a crime.
+    if (ctx.player.inCar && Math.abs(ctx.player.inCar.speed) > 3) {
+      const d = Math.hypot(p.mesh.position.x - ctx.player.pos.x, p.mesh.position.z - ctx.player.pos.z);
+      if (d < 2.2) {
+        ctx.scene.remove(p.mesh);
+        ctx.peds = ctx.peds.filter((x) => x !== p);
+        ctx.playerApi.addWanted(ctx, 1);
+        ctx.hud.toast('Pedestrian hit! Wanted +1 ★');
+      }
+    }
   }
-  car.wobble += dt * 0.7;
-}
-
-// Simple arcade driving for the car the player is in.
-export function driveCar(car, input, dt, buildings) {
-  const ax = input.axis();
-  if (ax.y < 0) car.speed = Math.min(CAR_MAX_SPEED, car.speed + 420 * dt);
-  else if (ax.y > 0) car.speed = Math.max(-170, car.speed - 420 * dt);
-  else car.speed *= Math.max(0, 1 - 1.6 * dt);
-  const steer = ax.x * (car.speed >= 0 ? 1 : -1);
-  car.angle += steer * 2.1 * dt * Math.min(1, Math.abs(car.speed) / 120);
-  const nx = car.x + Math.cos(car.angle) * car.speed * dt;
-  const ny = car.y + Math.sin(car.angle) * car.speed * dt;
-  if (!collidesWithBuildings(buildings, nx, ny, 20)) {
-    car.x = nx;
-    car.y = ny;
-  } else {
-    car.speed *= -0.25;
-  }
-  car.x = Math.max(30, Math.min(CITY_W - 30, car.x));
-  car.y = Math.max(30, Math.min(CITY_H - 30, car.y));
-  car.parked = false;
-}
-
-export function spawnPedestrians(seed, count) {
-  const rng = makeRng(seed + 303);
-  const peds = [];
-  for (let i = 0; i < count; i += 1) {
-    peds.push({
-      id: i,
-      x: rangeRng(rng, 100, CITY_W - 200),
-      y: rangeRng(rng, 100, CITY_H - 100),
-      angle: rangeRng(rng, 0, Math.PI * 2),
-      speed: rangeRng(rng, 28, 62),
-      color: pickFrom(rng, PED_COLORS),
-      targetX: rangeRng(rng, 100, CITY_W - 200),
-      targetY: rangeRng(rng, 100, CITY_H - 100),
-      panic: 0,
-    });
-  }
-  return peds;
-}
-
-export function updatePedestrian(ped, dt, buildings) {
-  const dx = ped.targetX - ped.x;
-  const dy = ped.targetY - ped.y;
-  const d = Math.hypot(dx, dy);
-  if (d < 24) {
-    ped.targetX = Math.random() * (CITY_W - 200) + 100;
-    ped.targetY = Math.random() * (CITY_H - 100) + 100;
-    return;
-  }
-  const sp = ped.speed * (ped.panic > 0 ? 2.4 : 1);
-  const nx = ped.x + (dx / d) * sp * dt;
-  const ny = ped.y + (dy / d) * sp * dt;
-  if (!collidesWithBuildings(buildings, nx, ny, 8)) {
-    ped.x = nx;
-    ped.y = ny;
-  }
-  ped.angle = Math.atan2(dy, dx);
-  if (ped.panic > 0) ped.panic -= dt;
 }
