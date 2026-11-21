@@ -1,65 +1,58 @@
-// Keyboard and mouse state, with edge-triggered "just pressed" keys.
-export class InputState {
+// Keyboard and mouse input for Solmar Bay.
+// Tracks held keys and one-frame "pressed" edges so the game can react to
+// taps (E, F, C, M, P) as well as held movement keys (WASD).
+
+export class Input {
   constructor() {
-    this.down = new Set();
+    this.held = new Set();
     this.pressed = new Set();
-    this.mouseX = 0;
-    this.mouseY = 0;
-    this.mouseDown = false;
-    this.mouseClicked = false;
-    this.anyKey = false;
-  }
-
-  attach(canvas) {
-    window.addEventListener('keydown', (e) => {
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
-      if (!e.repeat) this.pressed.add(e.key.toLowerCase());
-      this.down.add(e.key.toLowerCase());
-      this.anyKey = true;
-    });
-    window.addEventListener('keyup', (e) => {
-      this.down.delete(e.key.toLowerCase());
-    });
-    canvas.addEventListener('mousemove', (e) => {
-      const r = canvas.getBoundingClientRect();
-      this.mouseX = (e.clientX - r.left) * (canvas.width / r.width);
-      this.mouseY = (e.clientY - r.top) * (canvas.height / r.height);
-    });
-    canvas.addEventListener('mousedown', (e) => {
-      if (e.button === 0) {
-        this.mouseDown = true;
-        this.mouseClicked = true;
+    this.mouseDX = 0;
+    this.mouseDY = 0;
+    this.dragging = false;
+    this._onKeyDown = (e) => this._key(e, true);
+    this._onKeyUp = (e) => this._key(e, false);
+    this._onMouseDown = (e) => {
+      if (e.button === 0) this.dragging = true;
+    };
+    this._onMouseUp = () => { this.dragging = false; };
+    this._onMouseMove = (e) => {
+      if (this.dragging) {
+        this.mouseDX += e.movementX || 0;
+        this.mouseDY += e.movementY || 0;
       }
-    });
-    window.addEventListener('mouseup', (e) => {
-      if (e.button === 0) this.mouseDown = false;
-    });
-    window.addEventListener('blur', () => {
-      this.down.clear();
-      this.mouseDown = false;
-    });
+    };
+    this._onBlur = () => { this.held.clear(); this.dragging = false; };
   }
 
-  isDown(key) {
-    return this.down.has(key);
+  attach() {
+    window.addEventListener('keydown', this._onKeyDown);
+    window.addEventListener('keyup', this._onKeyUp);
+    window.addEventListener('mousedown', this._onMouseDown);
+    window.addEventListener('mouseup', this._onMouseUp);
+    window.addEventListener('mousemove', this._onMouseMove);
+    window.addEventListener('blur', this._onBlur);
   }
 
-  wasPressed(key) {
-    return this.pressed.has(key);
+  _key(e, down) {
+    const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    const gameKeys = ['w', 'a', 's', 'd', 'e', 'f', 'c', 'm', 'p', ' ', 'Escape', 'Shift'];
+    if (gameKeys.includes(k) || gameKeys.includes(e.key)) e.preventDefault();
+    if (down) {
+      if (!this.held.has(k)) this.pressed.add(k);
+      this.held.add(k);
+    } else {
+      this.held.delete(k);
+    }
   }
 
-  axis() {
-    let x = 0;
-    let y = 0;
-    if (this.isDown('a') || this.isDown('arrowleft')) x -= 1;
-    if (this.isDown('d') || this.isDown('arrowright')) x += 1;
-    if (this.isDown('w') || this.isDown('arrowup')) y -= 1;
-    if (this.isDown('s') || this.isDown('arrowdown')) y += 1;
-    return { x, y };
+  isDown(k) { return this.held.has(k); }
+  wasPressed(k) { return this.pressed.has(k); }
+  consumeMouse() {
+    const dx = this.mouseDX;
+    const dy = this.mouseDY;
+    this.mouseDX = 0;
+    this.mouseDY = 0;
+    return { dx, dy };
   }
-
-  endFrame() {
-    this.pressed.clear();
-    this.mouseClicked = false;
-  }
+  endFrame() { this.pressed.clear(); }
 }

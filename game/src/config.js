@@ -1,95 +1,152 @@
-// Solmar Bay — world constants, district names and mission data.
-// Every name, place and character here is invented for this game.
-export const CITY_W = 3600;
-export const CITY_H = 2600;
-export const VIEW_W = 1280;
-export const VIEW_H = 720;
+// Solmar Bay — tuning, districts and the story mission list.
+// All numbers are game design, written for this entry.
 
-export const DISTRICTS = [
-  { name: 'Marina Point', x: 0, y: 0, w: 900, h: 650, tint: '#2e6f8e' },
-  { name: 'Old Cannery', x: 900, y: 0, w: 900, h: 650, tint: '#7a6a4f' },
-  { name: 'Palm Court', x: 1800, y: 0, w: 900, h: 650, tint: '#c98a3d' },
-  { name: 'Coral Heights', x: 2700, y: 0, w: 900, h: 650, tint: '#4f7a5a' },
-  { name: 'Harbor Lights', x: 0, y: 650, w: 900, h: 650, tint: '#3d5a80' },
-  { name: 'Juniper Park', x: 900, y: 650, w: 900, h: 650, tint: '#3f7d4a' },
-  { name: 'Downtown Solmar', x: 1800, y: 650, w: 900, h: 650, tint: '#5a5f8a' },
-  { name: 'East Docks', x: 2700, y: 650, w: 900, h: 650, tint: '#6e5a7a' },
-  { name: 'South Beach', x: 0, y: 1300, w: 1800, h: 1300, tint: '#d9b06a' },
-  { name: 'Pier End', x: 1800, y: 1300, w: 1800, h: 1300, tint: '#2e7a8e' },
-];
-
-export const BEACH_X = 3300; // sand starts here; sea beyond 3450
-export const SEA_X = 3450;
-export const PARK = { x: 760, y: 560, w: 520, h: 460 };
-
-export const ROAD_STEP = 300;
-export const ROAD_W = 54;
-
-export const PLAYER_SPEED = 215;
-export const CAR_ACCEL = 420;
-export const CAR_MAX_SPEED = 430;
-export const CAR_REVERSE = 170;
-
-export const COLORS = {
-  grass: '#5da24a',
-  road: '#3a3f47',
-  roadLine: '#e8d44d',
-  sidewalk: '#9aa0a8',
-  sand: '#e8cf8f',
-  sea: '#1f7fa8',
-  park: '#4c8a3f',
-  buildingRoof: '#8a7f72',
-  player: '#ffcf3d',
-  police: '#2f6fd6',
+export const CFG = {
+  worldHalf: 200,          // city spans -200..200 on x and z
+  roadGap: 40,             // distance between parallel roads
+  roadHalfWidth: 5,        // half width of a road surface
+  walkSpeed: 8,
+  runSpeed: 13,
+  carAccel: 26,
+  carBrake: 42,
+  carMaxSpeed: 46,
+  carReverseMax: 14,
+  carTurn: 1.9,
+  playerMaxHealth: 100,
+  punchDamage: 14,
+  punchRange: 2.8,
+  punchCooldown: 0.45,
+  wantedDecaySeconds: 26,
+  policeRamDamage: 0,     // police ram slows the car instead of damaging it
+  saveKey: 'solmar-bay-save-v1',
+  startMoney: 250,
+  startPos: { x: 0, z: 120 },
 };
 
-export const RADIO = [
-  { name: 'BAY FM 88.2 — Sunset Pop', bpm: 96, root: 220, wave: 'triangle', minor: false },
-  { name: 'TURBO 107 — Street Bass', bpm: 138, root: 55, wave: 'sawtooth', minor: true },
-  { name: 'NIGHT DRIVE 94.5 — Neon Synth', bpm: 72, root: 164.8, wave: 'sine', minor: true },
+// Ten districts of Solmar Bay. Each is a rectangle; the HUD names the one
+// the player is standing in. Bounds are [minX, minZ, maxX, maxZ].
+export const DISTRICTS = [
+  { name: 'Marina Bay',     bounds: [-200, -200, -100, -100] },
+  { name: 'Neon Row',       bounds: [-100, -200,    0, -100] },
+  { name: 'Downtown',       bounds: [   0, -200,  100, -100] },
+  { name: 'Vista Heights',  bounds: [ 100, -200,  200, -100] },
+  { name: 'Old Town',       bounds: [-200, -100, -100,    0] },
+  { name: 'Palm Court',     bounds: [-100, -100,    0,    0] },
+  { name: 'Solmar Hills',   bounds: [   0, -100,  100,    0] },
+  { name: 'Harbor Docks',   bounds: [ 100, -100,  200,  100] },
+  { name: 'Coral Beach',    bounds: [-200,    0,    0,  200] },
+  { name: 'Fish Market',    bounds: [   0,    0,  200,  200] },
 ];
 
-export const MISSION_DEFS = [
+export function districtAt(x, z) {
+  for (const d of DISTRICTS) {
+    const b = d.bounds;
+    if (x >= b[0] && x < b[2] && z >= b[1] && z < b[3]) return d.name;
+  }
+  return 'Solmar Bay';
+}
+
+// Mission list. Every step is one objective; the engine in missions.js
+// reads step.type and drives the HUD, the beacon and the rewards.
+//   goto    — reach a point (radius)
+//   enterCar— get into any car, then the step completes
+//   collect — pick up N glowing items at fixed spots, then goto the drop
+//   defeat  — beat N thugs that spawn in an area
+//   wanted  — raise the wanted level to the given stars
+//   escape  — reach a point while wanted is at least the given stars
+//   timed   — a goto with a countdown (seconds)
+export const MISSIONS = [
   {
-    id: 1, title: 'First Fare', giver: 'Dina',
-    brief: 'Dina needs a cab. Drive the yellow taxi to the fare at Palm Court, then drop them at the pier.',
-    pay: 120,
+    title: '1 — New in Town',
+    giver: 'Rosa',
+    brief: 'Milo Ferran just rolled into Solmar Bay with $250 and a borrowed jacket. Rosa is waiting at Palm Court plaza. Walk over and say hello.',
+    payout: 200,
+    steps: [
+      { type: 'goto', label: 'Walk to Rosa at Palm Court plaza', x: 0, z: 60, radius: 6 },
+    ],
   },
   {
-    id: 2, title: 'The Pickup', giver: 'Marco',
-    brief: 'Marco left a package at the Old Cannery warehouse. Pick it up and bring it back to Dina.',
-    pay: 200,
+    title: '2 — Borrowed Wheels',
+    giver: 'Rosa',
+    brief: 'Rosa needs a car and the city is full of them. Take any parked car — nobody locks their doors in Solmar Bay — and bring it to the garage on Neon Row.',
+    payout: 350,
+    steps: [
+      { type: 'enterCar', label: 'Steal a parked car (press E near one)' },
+      { type: 'goto', label: 'Drive the car to the garage on Neon Row', x: -80, z: -120, radius: 7 },
+    ],
   },
   {
-    id: 3, title: 'Hot Delivery', giver: 'Marco',
-    brief: 'Deliver the package to the Neon Mile club before the timer runs out. Drive fast, stay clean.',
-    pay: 350, timeLimit: 75,
+    title: '3 — Package Run',
+    giver: 'Rosa',
+    brief: 'Three packages are stashed around Old Town and Palm Court. Pick them all up and drop them at the Fish Market. Cops do not like couriers, so stay cool.',
+    payout: 500,
+    steps: [
+      { type: 'collect', label: 'Collect the 3 packages', count: 3,
+        spots: [{ x: -120, z: -40 }, { x: -40, z: -40 }, { x: 0, z: 40 }],
+        drop: { x: 120, z: 120, radius: 7 }, dropLabel: 'Deliver the packages to the Fish Market' },
+    ],
   },
   {
-    id: 4, title: 'Bay Grand Prix', giver: 'Rosa',
-    brief: 'Rosa bets you cannot beat her street race. Hit all 5 checkpoints around Solmar Bay first.',
-    pay: 600,
+    title: '4 — Heat Wave',
+    giver: 'Dante',
+    brief: 'Dante wants to know if you can handle heat. Get the cops to 2 stars — smash something, steal a car, make noise — then lose them at the safehouse in Vista Heights.',
+    payout: 600,
+    steps: [
+      { type: 'wanted', label: 'Raise your wanted level to 2 stars', stars: 2 },
+      { type: 'escape', label: 'Reach the Vista Heights safehouse while wanted', x: 160, z: -160, radius: 8, stars: 2 },
+    ],
   },
   {
-    id: 5, title: 'Warehouse Shootout', giver: 'Marco',
-    brief: 'Rivals took the East Docks warehouse. Clear out all 6 armed guards. Watch your health.',
-    pay: 800,
+    title: '5 — Dockside Muscle',
+    giver: 'Dante',
+    brief: 'A crew of dock thugs is shaking down Dante’s drivers at Harbor Docks. Go on foot and punch all three of them out. Press F to punch.',
+    payout: 700,
+    steps: [
+      { type: 'goto', label: 'Go to Harbor Docks', x: 160, z: 20, radius: 10 },
+      { type: 'defeat', label: 'Beat up the 3 dock thugs', count: 3, area: { x: 150, z: 40, r: 22 } },
+    ],
   },
   {
-    id: 6, title: 'Rush Hour', giver: 'Dina',
-    brief: 'Three fares, one shift. Pick up and drop off three passengers across the city.',
-    pay: 500,
+    title: '6 — Getaway Driver',
+    giver: 'Rosa',
+    brief: 'Rosa’s friend needs a fast ride out of Downtown with the cops already on 2 stars. Pick him up at the plaza and drop him at Coral Beach before the timer runs out.',
+    payout: 900,
+    steps: [
+      { type: 'enterCar', label: 'Get in a car' },
+      { type: 'goto', label: 'Pick up the passenger in Downtown', x: 40, z: -140, radius: 7 },
+      { type: 'timed', label: 'Drive the passenger to Coral Beach — fast!', x: -120, z: 120, radius: 8, seconds: 75 },
+    ],
   },
   {
-    id: 7, title: 'Heat Wave', giver: 'Rosa',
-    brief: 'The whole force is after you. Survive 30 seconds at 3 wanted stars without getting busted.',
-    pay: 900,
+    title: '7 — Beachfront Heist',
+    giver: 'Dante',
+    brief: 'Four bags of cash are buried in the sand along Coral Beach. Grab them all while the beach patrol is watching — the heat is already on 1 star.',
+    payout: 1200,
+    steps: [
+      { type: 'collect', label: 'Grab the 4 cash bags on Coral Beach', count: 4,
+        spots: [{ x: -160, z: 170 }, { x: -100, z: 180 }, { x: -40, z: 165 }, { x: -120, z: 120 }],
+        drop: { x: -160, z: 60, radius: 7 }, dropLabel: 'Drop the bags at the beach shack' },
+    ],
   },
   {
-    id: 8, title: 'King of the Bay', giver: 'Marco',
-    brief: 'Final showdown at Pier End. Take down Salvo and his crew of 8 and claim Solmar Bay.',
-    pay: 2000,
+    title: '8 — King of the Bay',
+    giver: 'Rosa',
+    brief: 'One last job. The bay boss, Vito Marlowe, is holding court at the yacht club. Beat him in a fist fight, then take the boat ramp at Marina Bay and own this city.',
+    payout: 1500,
+    steps: [
+      { type: 'goto', label: 'Go to the yacht club at Marina Bay', x: -160, z: -160, radius: 10 },
+      { type: 'defeat', label: 'Beat Vito Marlowe', count: 1, boss: true, area: { x: -160, z: -160, r: 18 } },
+      { type: 'goto', label: 'Take the boat ramp and finish the story', x: -180, z: -120, radius: 8 },
+    ],
   },
 ];
 
-export const SAVE_KEY = 'solmar-bay-save-v1';
+export const CAR_COLORS = [
+  0xd43d2a, 0x2a6fd4, 0xf2c230, 0x37b24d, 0x8e44ad, 0xe67e22,
+  0xe8e8e8, 0x222831, 0x0f9ba8, 0xc2185b, 0x7cb342, 0x5d4037,
+];
+
+export const PED_COLORS = [
+  0xe74c3c, 0x3498db, 0x2ecc71, 0xf39c12, 0x9b59b6, 0x1abc9c,
+  0xecf0f1, 0xfd79a8, 0x00cec9, 0x6c5ce7, 0xd63031, 0x00b894,
+];
